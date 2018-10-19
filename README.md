@@ -92,7 +92,8 @@ Would result in the following stdout:
 
 ```text
 outbound-ssh-server: starting on 0.0.0.0:9000
-outbound-ssh-server: startedoutbound-ssh-server: accepted connection from 192.168.230.13:62572
+outbound-ssh-server: started
+outbound-ssh-server: accepted connection from 192.168.230.13:62572
 establishing netconf to device via: 192.168.230.13:62572
 gathering basic facts from device via: 192.168.230.13:62572
 {
