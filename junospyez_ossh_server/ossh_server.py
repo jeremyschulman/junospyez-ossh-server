@@ -4,7 +4,9 @@ import json
 
 from jnpr.junos import Device
 from jnpr.junos.exception import ConnectError
-from junospyez_ossh_server.log import log
+from junospyez_ossh_server.log import logger
+
+__all__ = ['OutboundSSHServer']
 
 
 def gather_basic_facts(device):
@@ -73,6 +75,7 @@ def gather_basic_facts(device):
 class OutboundSSHServer(object):
     NAME = 'outbound-ssh-server'
     DEFAULT_LISTEN_BACKLOG = 10
+    logger = logger
 
     def __init__(self, ipaddr, port, login_user, login_password):
         """
@@ -124,7 +127,7 @@ class OutboundSSHServer(object):
             self._setup_server_socket()
 
         except Exception as exc:
-            log.error(f'{self.name}: failed to setup socket: %s' % str(exc))
+            logger.error(f'{self.name}: failed to setup socket: %s' % str(exc))
             return
 
         while True:
@@ -139,12 +142,12 @@ class OutboundSSHServer(object):
 
             except ConnectionAbortedError:
                 # this triggers when the server socket is closed by the shutdown() method
-                log.info(f'{self.name} shutting down')
+                logger.info(f'{self.name} shutting down')
                 return
 
             in_str = f'{in_addr}:{in_port}'
             dev_name = f'device-{in_str}'
-            log.info(f'{self.name}: accepted connection from {in_str}')
+            logger.info(f'{self.name}: accepted connection from {in_str}')
 
             # spawn a device-specific thread for further processing
 
@@ -153,12 +156,12 @@ class OutboundSSHServer(object):
                        kwargs=dict(in_sock=in_sock, in_addr=in_addr, in_port=in_port)).start()
 
             except RuntimeError as exc:
-                log.err(f'{self.name}: ERROR: failed to start processing {in_addr}: %s' % str(exc))
+                logger.err(f'{self.name}: ERROR: failed to start processing {in_addr}: %s' % str(exc))
                 in_sock.close()
                 continue
 
         # NOT REACHABLE
-        log.critical('Unreachable code reached')
+        logger.critical('Unreachable code reached')
 
     def _device_thread(self, in_sock, in_addr, in_port):
         """
@@ -187,33 +190,33 @@ class OutboundSSHServer(object):
         # information retrieved
 
         try:
-            log.info(f"establishing netconf to device via: {via_str}")
+            logger.info(f"establishing netconf to device via: {via_str}")
             dev = Device(sock_fd=sock_fd, user=self.login_user, password=self.login_password)
             dev.open()
 
         except ConnectError as exc:
-            log.error(f'Connection error to device via {via_str}: {exc.msg}')
+            logger.error(f'Connection error to device via {via_str}: {exc.msg}')
             in_sock.close()
             return
 
         except Exception as exc:
-            log.error(f'unable to establish netconf to device via {via_str}: {str(exc)}')
+            logger.error(f'unable to establish netconf to device via {via_str}: {str(exc)}')
             in_sock.close()
 
         try:
-            log.info(f"gathering basic facts from device via: {via_str}")
+            logger.info(f"gathering basic facts from device via: {via_str}")
             facts = gather_basic_facts(dev)
-            log.info(json.dumps(facts, indent=3))
+            logger.info(json.dumps(facts, indent=3))
 
             # call user on-device callback
             self.on_device(device=dev, facts=facts)
 
-            log.info(f"completed device with management IP address: {facts['mgmt_ipaddr']}")
+            logger.info(f"completed device with management IP address: {facts['mgmt_ipaddr']}")
             dev.close()
 
         except Exception as exc:
             error = f"ERROR: unable to process device {in_addr}:{in_port}: %s" % str(exc)
-            log.error(error)
+            logger.error(error)
             if self.on_error:
                 self.on_error(dev, exc)
 
@@ -222,7 +225,7 @@ class OutboundSSHServer(object):
 
     def start(self, on_device, on_error=None):
         if self.socket:
-            log.error(f'{self.name} already running')
+            logger.error(f'{self.name} already running')
             return False
 
         if not callable(on_device):
@@ -231,7 +234,7 @@ class OutboundSSHServer(object):
         if on_error and not callable(on_error):
             raise ValueError(f'on_error is not callable')
 
-        log.info(f'{self.name}: starting on {self.bind_ipaddr}:{self.bind_port}')
+        logger.info(f'{self.name}: starting on {self.bind_ipaddr}:{self.bind_port}')
 
         self.on_device = on_device
         self.on_error = on_error
@@ -241,10 +244,10 @@ class OutboundSSHServer(object):
             self.thread.start()
 
         except Exception as exc:
-            log.error(f'{self.name} unable to start: %s' % str(exc))
+            logger.error(f'{self.name} unable to start: %s' % str(exc))
             return False
 
-        log.info(f'{self.name}: started')
+        logger.info(f'{self.name}: started')
         return True
 
     def stop(self):
