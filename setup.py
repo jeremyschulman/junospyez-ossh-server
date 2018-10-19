@@ -10,8 +10,10 @@ def requirements(filename='requirements.txt'):
 setup(
     name=about.package_name,
     version=about.package_version,
-    description='Junos OSSH server',
-    author='jschulman@juniper.net',
+    description='Outbound SSH for use with Junos systems',
+    author='Jeremy Schulman',
+    author_email='jschulman@juniper.net',
     packages=find_packages(),
-    install_requires=requirements()
+    install_requires=requirements(),
+    url='https://github.com/jeremyschulman/junospyez-ossh-server'
 )
