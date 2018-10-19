@@ -73,11 +73,12 @@ def gather_basic_facts(device):
 
 
 class OutboundSSHServer(object):
+
     NAME = 'outbound-ssh-server'
     DEFAULT_LISTEN_BACKLOG = 10
     logger = logger
 
-    def __init__(self, ipaddr, port, login_user, login_password):
+    def __init__(self, ipaddr, port, login_user, login_password, on_device=None, on_error=None):
         """
         Parameters
         ----------
@@ -92,6 +93,26 @@ class OutboundSSHServer(object):
 
         login_password : str
             The device login password
+
+        on_device : callaback
+            User callback function that is invoked when the server has remote device NETCONF establish
+            and has retrieved basic facts.  The callback takes two parameters, the PyEZ device instance,
+            and a dictionary of gathered basic facts, for example:
+
+            >>> import json
+            >>>
+            >>> def dump_facts(device, facts):
+            >>>     print("GOT FACTS: ", json.dumps(facts, indent=3))
+
+        on_error : callback
+            User callback function that is invoked when error occurs when attempting to
+            connect or communicate with remote device.  The callback takes two parameters, the PyEZ device
+            instance (could be None) and the error exception instance, for example:
+
+            >>> import json
+            >>>
+            >>> def dump_error(device, exc):
+            >>>     print("GOT ERROR: ", str(exc))
         """
 
         self.thread = None
@@ -102,12 +123,50 @@ class OutboundSSHServer(object):
         self.bind_port = int(port)
         self.listen_backlog = OutboundSSHServer.DEFAULT_LISTEN_BACKLOG
 
-        self.on_device = None     # callable provided at :meth:`start`
-        self.on_error = None      # callable provided at :meth:`start`
+        self._callbacks = dict()
+
+        self.on_device = on_device      # callable also provided at :meth:`start`
+        self.on_error = on_error        # callable also provided at :meth:`start`
+
+    # ----------------------------------------------------------------------------------------------------------------
+    # PROPERTIES
+    # ----------------------------------------------------------------------------------------------------------------
 
     @property
     def name(self):
         return self.__class__.NAME
+
+    @property
+    def on_device(self):
+        def no_op(device, facts):
+            pass
+
+        return self._callbacks['on_device'] or no_op
+
+    @on_device.setter
+    def on_device(self, callback):
+        if callback and not callable(callback):
+            raise ValueError('callback is not callable')
+
+        self._callbacks['on_device'] = callback
+
+    @property
+    def on_error(self):
+        def no_op(device, exc):
+            pass
+
+        return self._callbacks['on_error'] or no_op
+
+    @on_error.setter
+    def on_error(self, callback):
+        if callback and not callable(callback):
+            raise ValueError('callback is not callable')
+
+        self._callbacks['on_error'] = callback
+
+    # ----------------------------------------------------------------------------------------------------------------
+    # PRIVATE METHODS
+    # ----------------------------------------------------------------------------------------------------------------
 
     def _setup_server_socket(self):
         s_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -209,7 +268,7 @@ class OutboundSSHServer(object):
             logger.info(json.dumps(facts, indent=3))
 
             # call user on-device callback
-            self.on_device(device=dev, facts=facts)
+            self.on_device(dev, facts)
 
             logger.info(f"completed device with management IP address: {facts['mgmt_ipaddr']}")
             dev.close()
@@ -223,34 +282,83 @@ class OutboundSSHServer(object):
         finally:
             in_sock.close()
 
-    def start(self, on_device, on_error=None):
+    # ----------------------------------------------------------------------------------------------------------------
+    # PUBLIC METHODS
+    # ----------------------------------------------------------------------------------------------------------------
+
+    def start(self, on_device=None, on_error=None):
+        """
+        Start the ossh-server background thread.
+
+        Examples
+        --------
+        Start the server, will use the existing server attributes.
+
+            >>> ok, msg = server.start()
+
+        Start the server, provide a new `on_device` callback.
+
+            >>> import json
+            >>>
+            >>> def dump_facts(device, facts):
+            >>>     print("GOT FACTS: ", json.dumps(facts, indent=3))
+            >>>
+            >>> ok, msg = server.start(on_device=dump_facts)
+
+        Parameters
+        ----------
+        on_device : callaback
+            User callback function that is invoked when the server has remote device NETCONF establish
+            and has retrieved basic facts.
+
+        on_error : callback
+            User callback function that is invoked when error occurs when attempting to
+            connect or communicate with remote device.
+
+        Returns
+        -------
+        tuple
+            ok : bool
+                True if started ok, False otherwise
+            msg : str
+                message string
+        """
+
         if self.socket:
-            logger.error(f'{self.name} already running')
-            return False
+            msg = f'{self.name} already running'
+            logger.error(msg)
+            return False, msg
 
-        if not callable(on_device):
-            raise ValueError(f'on_device is not callable')
+        if on_device:
+            self.on_device = on_device
 
-        if on_error and not callable(on_error):
-            raise ValueError(f'on_error is not callable')
+        if on_error:
+            self.on_error = on_error
 
         logger.info(f'{self.name}: starting on {self.bind_ipaddr}:{self.bind_port}')
-
-        self.on_device = on_device
-        self.on_error = on_error
 
         try:
             self.thread = Thread(name=self.name, target=self._server_thread)
             self.thread.start()
 
         except Exception as exc:
-            logger.error(f'{self.name} unable to start: %s' % str(exc))
-            return False
+            msg = f'{self.name} unable to start: %s' % str(exc)
+            logger.error(msg)
+            return False, msg
 
-        logger.info(f'{self.name}: started')
-        return True
+        msg = f'{self.name}: started'
+        logger.info(msg)
+        return True, msg
 
     def stop(self):
+        """
+        Stops the ossh-server thread.
+
+        Examples
+        --------
+            >>> server.stop()
+        """
         self.socket.close()
         self.thread = None
         self.socket = None
+        logger.info(f'{self.name}: stopped')
